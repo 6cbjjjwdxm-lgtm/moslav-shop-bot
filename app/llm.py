@@ -30,52 +30,47 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "search_catalog",
-            "description": "Ищет товары в каталоге магазина по текстовому запросу/цвету/размеру.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "color": {"type": "string"},
-                    "size": {"type": "string"},
-                    "limit": {"type": "integer", "default": 6},
-                },
-                "required": [],
+        "name": "search_catalog",
+        "description": "Ищет товары в каталоге магазина по текстовому запросу/цвету/размеру.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "color": {"type": "string"},
+                "size": {"type": "string"},
+                "limit": {"type": "integer", "default": 6},
             },
+            "required": [],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "create_order_intent",
-            "description": "Создает черновик заказа (намерение покупки) с выбранными товарами и пожеланиями пользователя.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_id": {"type": "integer"},
+        "name": "create_order_intent",
+        "description": "Создает черновик заказа (намерение покупки) с выбранными товарами и пожеланиями пользователя.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer"},
+                "items": {
+                    "type": "array",
                     "items": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "sku": {"type": "string"},
-                                "color": {"type": "string"},
-                                "size": {"type": "string"},
-                                "qty": {"type": "integer", "default": 1},
-                            },
-                            "required": ["sku"],
+                        "type": "object",
+                        "properties": {
+                            "sku": {"type": "string"},
+                            "color": {"type": "string"},
+                            "size": {"type": "string"},
+                            "qty": {"type": "integer", "default": 1},
                         },
+                        "required": ["sku"],
                     },
-                    "delivery_preference": {"type": "string"},
-                    "comment": {"type": "string"},
                 },
-                "required": ["user_id", "items"],
+                "delivery_preference": {"type": "string"},
+                "comment": {"type": "string"},
             },
+            "required": ["user_id", "items"],
         },
     },
 ]
-
 
 def _dump_item(x: Any) -> Any:
     # openai-python часто возвращает pydantic-модели; для повторной отправки в input нужен dict

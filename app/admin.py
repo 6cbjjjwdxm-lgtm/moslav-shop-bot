@@ -24,6 +24,9 @@ from .db import (
 
 router = Router(name="admin")
 
+ADMIN_FILTER = F.from_user.id.in_(list(settings.admin_id_set))
+PRIVATE_FILTER = F.chat.type == ChatType.PRIVATE
+
 WHOLESALE_NOTE = "По вопросам закупок по оптовым ценам обращайтесь по тел. 8-903-776-17-47"
 
 GENDERS = [

@@ -24,7 +24,13 @@ from .db import (
 
 router = Router(name="admin")
 
-ADMIN_FILTER = F.from_user.id.in_(list(settings.admin_id_set))
+MY_ADMIN_ID = 123456789  # сюда поставь свой Telegram ID
+
+ADMIN_FILTER = F.from_user.id == MY_ADMIN_ID
+
+def _is_admin(user_id: int) -> bool:
+    return user_id == MY_ADMIN_ID
+
 PRIVATE_FILTER = F.chat.type == ChatType.PRIVATE
 
 WHOLESALE_NOTE = "По вопросам закупок по оптовым ценам обращайтесь по тел. 8-903-776-17-47"

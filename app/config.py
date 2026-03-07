@@ -1,3 +1,5 @@
+import os
+
 from pydantic import computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -5,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     BOT_TOKEN: str
     OPENAI_API_KEY: str = ""
-    WEBHOOK_BASE: str
+    WEBHOOK_BASE: str = ""
     WEBHOOK_PATH: str = "/webhook"
     WEBHOOK_SECRET: str
     DB_PATH: str = "/var/data/moslav.sqlite3"
@@ -16,22 +18,26 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @field_validator("WEBHOOK_BASE", mode="before")
+    @classmethod
+    def parse_webhook_base(cls, v):
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        return os.getenv("RENDER_EXTERNAL_URL", "").strip()
+
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
     def parse_admin_ids(cls, v):
         if v is None or v == "":
             return []
-
         if isinstance(v, list):
             return [int(x) for x in v]
-
         if isinstance(v, str):
             s = v.strip()
             if s.startswith("[") and s.endswith("]"):
                 import json
                 return [int(x) for x in json.loads(s)]
             return [int(x.strip()) for x in s.split(",") if x.strip()]
-
         return v
 
     @computed_field
@@ -41,8 +47,10 @@ class Settings(BaseSettings):
 
     @property
     def webhook_url(self) -> str:
-        return f"{self.WEBHOOK_BASE.rstrip('/')}{self.WEBHOOK_PATH}"
+        base = self.WEBHOOK_BASE.rstrip("/")
+        return f"{base}{self.WEBHOOK_PATH}"
 
 
 settings = Settings()
+
 

@@ -273,7 +273,7 @@ async def send_product_card(chat_id: int, sku: str, bot: Bot) -> None:
         await bot.send_message(chat_id, text, reply_markup=kb)
 
 
-@router.message(Command("start"))
+@router.message(Command("start"), PRIVATE_FILTER, ADMIN_FILTER)
 async def admin_start(m: Message):
     if not m.from_user or m.chat.type != ChatType.PRIVATE:
         return
@@ -468,7 +468,7 @@ async def add_photos_skip(cb: CallbackQuery, bot: Bot):
     await send_product_card(cb.from_user.id, sku, bot)
 
 
-@router.message(F.photo)
+@router.message(F.photo, PRIVATE_FILTER, ADMIN_FILTER)
 async def admin_photo_input(m: Message):
     if not m.from_user or m.chat.type != ChatType.PRIVATE:
         return
@@ -487,7 +487,7 @@ async def admin_photo_input(m: Message):
     )
 
 
-@router.message(F.text)
+@router.message(F.text, PRIVATE_FILTER, ADMIN_FILTER)
 async def admin_text_router(m: Message, bot: Bot):
     if not m.from_user or m.chat.type != ChatType.PRIVATE:
         return

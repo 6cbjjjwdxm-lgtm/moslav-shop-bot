@@ -47,3 +47,11 @@ async def telegram_webhook(req: Request):
     await dp.feed_update(bot, update)
     return {"ok": True}
 
+@app.get("/")
+async def root():
+    return {"ok": True, "service": "moslav-shop-bot"}
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
+

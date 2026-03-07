@@ -1,6 +1,13 @@
 ﻿from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.enums import ChatType
+
+@router.message()
+async def any_text(m: Message):
+    if m.chat.type != ChatType.PRIVATE:
+        return
+    ...
 
 from .config import settings
 from .db import get_conversation, upsert_conversation

@@ -1,6 +1,10 @@
 ﻿from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
+from .admin import router as admin_router
+
+dp.include_router(admin_router)
+dp.include_router(router)  # твой обычный router
 
 from .config import settings
 from .db import init_db

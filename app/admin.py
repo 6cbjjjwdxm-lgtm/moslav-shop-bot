@@ -24,7 +24,7 @@ from .db import (
 
 router = Router(name="admin")
 
-MY_ADMIN_ID = 123456789  # сюда поставь свой Telegram ID
+MY_ADMIN_ID = 459980503  # сюда поставь свой Telegram ID
 
 ADMIN_FILTER = F.from_user.id == MY_ADMIN_ID
 

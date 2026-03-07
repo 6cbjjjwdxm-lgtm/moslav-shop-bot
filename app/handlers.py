@@ -1,13 +1,7 @@
-﻿from aiogram import Router
+from aiogram import Router
+from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.enums import ChatType
-
-@router.message()
-async def any_text(m: Message):
-    if m.chat.type != ChatType.PRIVATE:
-        return
-    ...
 
 from .config import settings
 from .db import get_conversation, upsert_conversation
@@ -23,6 +17,9 @@ def _is_admin(user_id: int) -> bool:
 
 @router.message(Command("start"))
 async def start(m: Message):
+    if m.chat.type != ChatType.PRIVATE:
+        return
+
     await m.answer(
         "Привет! Я менеджер магазина одежды.\n"
         "Напиши, что ищешь (например: худи на зиму, черное, до 6000), и я подберу варианты."
@@ -31,10 +28,12 @@ async def start(m: Message):
 
 @router.message(Command("add"))
 async def admin_add(m: Message):
+    if m.chat.type != ChatType.PRIVATE:
+        return
+
     if not m.from_user or not _is_admin(m.from_user.id):
         return await m.answer("Команда доступна только админам.")
 
-    # /add SKU | Название | Цвет | Размер | Цена | Описание (опц.)
     text = (m.text or "").replace("/add", "", 1).strip()
     parts = [p.strip() for p in text.split("|")]
     if len(parts) < 5:
@@ -60,14 +59,21 @@ async def admin_add(m: Message):
 
 @router.message(Command("reset"))
 async def reset(m: Message):
+    if m.chat.type != ChatType.PRIVATE:
+        return
+
     if not m.from_user:
         return
+
     await upsert_conversation(m.from_user.id, [])
     await m.answer("Диалог сброшен. Напиши, что ищешь.")
 
 
 @router.message()
 async def any_text(m: Message):
+    if m.chat.type != ChatType.PRIVATE:
+        return
+
     if not m.from_user or not m.text:
         return
 
@@ -82,3 +88,4 @@ async def any_text(m: Message):
     await upsert_conversation(user_id, history)
 
     await m.answer(reply)
+

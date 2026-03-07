@@ -1,19 +1,18 @@
-﻿from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from .admin import router as admin_router
-
-dp.include_router(admin_router)
-dp.include_router(router)  # твой обычный router
 
 from .config import settings
 from .db import init_db
 from .handlers import router
+from .admin import router as admin_router
 
 app = FastAPI()
 
 bot = Bot(token=settings.BOT_TOKEN)
 dp = Dispatcher()
+
+dp.include_router(admin_router)
 dp.include_router(router)
 
 
@@ -21,8 +20,6 @@ dp.include_router(router)
 async def on_startup():
     await init_db()
     url = settings.webhook_url
-
-    # Telegram принимает webhook только на HTTPS, поэтому локальный http://localhost пропускаем.
     if url.startswith("https://"):
         await bot.set_webhook(
             url=url,
@@ -49,3 +46,4 @@ async def telegram_webhook(req: Request):
     update = Update.model_validate(data)
     await dp.feed_update(bot, update)
     return {"ok": True}
+

@@ -3,16 +3,10 @@ from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from .config import settings
 from .db import get_conversation, upsert_conversation
-from .catalog import add_product
 from .llm import chat
 
 router = Router()
-
-
-def _is_admin(user_id: int) -> bool:
-    return user_id in settings.admin_id_set
 
 
 @router.message(Command("start"))
@@ -24,37 +18,6 @@ async def start(m: Message):
         "Привет! Я менеджер магазина одежды.\n"
         "Напиши, что ищешь (например: худи на зиму, черное, до 6000), и я подберу варианты."
     )
-
-
-@router.message(Command("add"))
-async def admin_add(m: Message):
-    if m.chat.type != ChatType.PRIVATE:
-        return
-
-    if not m.from_user or not _is_admin(m.from_user.id):
-        return await m.answer("Команда доступна только админам.")
-
-    text = (m.text or "").replace("/add", "", 1).strip()
-    parts = [p.strip() for p in text.split("|")]
-    if len(parts) < 5:
-        return await m.answer("Формат:\n/add SKU | Название | Цвет | Размер | Цена | Описание (опц.)")
-
-    sku, title, color, size, price = parts[:5]
-    description = parts[5] if len(parts) >= 6 else ""
-
-    await add_product(
-        {
-            "sku": sku,
-            "title": title,
-            "color": color,
-            "size": size,
-            "price": float(price.replace(",", ".")),
-            "description": description,
-            "currency": "RUB",
-        }
-    )
-
-    await m.answer(f"Ок, товар {sku} добавлен/обновлён.")
 
 
 @router.message(Command("reset"))
@@ -88,4 +51,5 @@ async def any_text(m: Message):
     await upsert_conversation(user_id, history)
 
     await m.answer(reply)
+
 

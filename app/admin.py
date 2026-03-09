@@ -62,7 +62,7 @@ CATEGORIES = [
 
 SEASONS = [
     ("Лето", "summer"),
-    ("Осень", "autumn"),
+    ("Весна-Осень", "autumn"),
     ("Зима", "winter"),
     ("Еврозима", "euro_winter"),
 ]
@@ -94,7 +94,7 @@ CATEGORY_LABELS = {
 
 SEASON_LABELS = {
     "summer": "лето",
-    "autumn": "осень",
+    "autumn": "Весна-Осень",
     "winter": "зима",
     "euro_winter": "еврозима",
 }

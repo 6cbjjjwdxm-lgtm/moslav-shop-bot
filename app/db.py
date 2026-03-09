@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS product_photos (
   file_id TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_publications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sku TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
   user_id INTEGER PRIMARY KEY,
   psychotype TEXT DEFAULT '',
@@ -79,7 +87,7 @@ async def init_db() -> None:
         await db.commit()
 
 
-# -------- Conversations (как было) --------
+# -------- Conversations --------
 async def upsert_conversation(user_id: int, messages: list[dict[str, Any]]) -> None:
     now = int(time.time())
     async with aiosqlite.connect(settings.DB_PATH) as db:
@@ -150,7 +158,7 @@ async def get_product(sku: str) -> Optional[dict[str, Any]]:
         colors = await cur.fetchall()
 
         cur = await db.execute(
-            "SELECT file_id FROM product_photos WHERE sku=?",
+            "SELECT file_id FROM product_photos WHERE sku=? ORDER BY id",
             (sku,),
         )
         photos = await cur.fetchall()
@@ -321,4 +329,51 @@ async def add_photo_file_id(sku: str, file_id: str) -> None:
             (sku, file_id),
         )
         await db.commit()
+
+
+# -------- Product publications --------
+async def save_product_publication(sku: str, chat_id: str, message_id: int) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO product_publications(sku, chat_id, message_id, created_at)
+            VALUES(?,?,?,?)
+            """,
+            (sku, str(chat_id), int(message_id), int(time.time())),
+        )
+        await db.commit()
+
+
+async def get_product_publications(sku: str) -> list[dict[str, Any]]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """
+            SELECT sku, chat_id, message_id, created_at
+            FROM product_publications
+            WHERE sku=?
+            ORDER BY id
+            """,
+            (sku,),
+        )
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "sku": row[0],
+            "chat_id": row[1],
+            "message_id": row[2],
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+async def clear_product_publications(sku: str) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM product_publications WHERE sku=?",
+            (sku,),
+        )
+        await db.commit()
+
 

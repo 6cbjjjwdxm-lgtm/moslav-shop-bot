@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     WEBHOOK_SECRET: str
     DB_PATH: str = "/var/data/moslav.sqlite3"
     ADMIN_IDS: list[int] = []
+    CHANNEL_ID: str = "-1001988399559"
 
     model_config = SettingsConfigDict(
         env_file=".env",

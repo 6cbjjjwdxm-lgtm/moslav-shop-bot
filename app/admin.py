@@ -19,7 +19,10 @@ from .config import settings
 from .db import (
     add_color,
     add_photo_file_id,
+    clear_product_publications,
     get_product,
+    get_product_publications,
+    save_product_publication,
     set_color_active,
     set_product_active,
     set_variant_active,
@@ -36,7 +39,7 @@ ALL_ADMIN_IDS = list(set([MY_ADMIN_ID, *list(getattr(settings, "admin_id_set", s
 ADMIN_FILTER = F.from_user.id.in_(ALL_ADMIN_IDS)
 PRIVATE_FILTER = F.chat.type == ChatType.PRIVATE
 
-WHOLESALE_NOTE = "По вопросам закупок по оптовым ценам обращайтесь по тел. 8-903-776-17-47"
+WHOLESALE_NOTE = "По вопросам закупок по оптовым ценам обращайтесь по тел. +7(903)776-17-47"
 
 GENDERS = [
     ("Мужской", "male"),
@@ -114,22 +117,38 @@ def _normalize_sku(text: str) -> str:
 
 
 def _ensure_note(description: str) -> str:
-    desc = (description or "").strip()
-    if WHOLESALE_NOTE.lower() in desc.lower():
-        return desc
-    if desc:
-        return f"{desc}\n\n{WHOLESALE_NOTE}"
-    return WHOLESALE_NOTE
+    return (description or "").strip()
 
 
-def _format_price(value: float | int) -> str:
+def _format_price(value: float | int | str) -> str:
     try:
-        f = float(value)
+        raw = str(value).replace(" ", "").replace(",", ".")
+        f = float(raw)
         if f.is_integer():
-            return str(int(f))
-        return str(f)
+            return f"{int(f):,}".replace(",", " ")
+        return f"{f:,.2f}".replace(",", " ").replace(".00", "")
     except Exception:
-        return str(value)
+        return str(value).strip()
+
+
+def _unique_keep_order(items: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    for item in items:
+        val = (item or "").strip()
+        if not val:
+            continue
+        if val in seen:
+            continue
+        seen.add(val)
+        out.append(val)
+    return out
+
+
+def _sort_sizes(items: list[str]) -> list[str]:
+    order = {size: i for i, size in enumerate(SIZES)}
+    cleaned = _unique_keep_order(items)
+    return sorted(cleaned, key=lambda x: order.get(x, 999))
 
 
 def _admin_home_kb() -> InlineKeyboardMarkup:
@@ -220,71 +239,117 @@ def _colors_manage_kb(
 
 
 def _render_product_text(p: dict) -> str:
-    out = []
-    if p.get("is_sale"):
-        out.append("🔥 РАСПРОДАЖА")
-    out.append(f"Артикул: {p['sku']}")
-    out.append(f"Название: {p.get('title', '')}")
-    out.append(f"Цена: {p.get('price', 0)} {p.get('currency', 'RUB')}")
-    out.append(f"Статус: {'АКТИВЕН' if p.get('is_active') else 'НЕ АКТИВЕН'}")
-    out.append(f"Пол: {p.get('gender', '')}")
-    out.append(f"Категория: {p.get('category', '')}")
-    out.append(f"Сезон: {p.get('season', '')}")
-    if p.get("insulation"):
-        out.append(f"Утеплитель: {p.get('insulation')}")
-    if p.get("material"):
-        out.append(f"Материал: {p.get('material')}")
-    sizes = [x["size"] for x in p.get("sizes", []) if x.get("is_active")]
-    colors = [x["color"] for x in p.get("colors", []) if x.get("is_active")]
-    out.append("Размеры: " + (", ".join(sizes) if sizes else "—"))
-    out.append("Цвета: " + (", ".join(colors) if colors else "—"))
-    desc = (p.get("description") or "").strip()
-    if desc:
-        out.append("")
-        out.append(desc)
-    return "\n".join(out)
-
-
-def _render_channel_text(p: dict) -> str:
-    sizes = [x["size"] for x in p.get("sizes", []) if x.get("is_active")]
-    colors = [x["color"] for x in p.get("colors", []) if x.get("is_active")]
-
-    lines = []
-
-    if p.get("is_sale"):
-        lines.append("🔥 РАСПРОДАЖА")
-
-    title = (p.get("title") or "").strip()
-    if title:
-        lines.append(title)
-
-    lines.append(f"Артикул: {p['sku']}")
-    lines.append(f"Цена: {_format_price(p.get('price', 0))} {p.get('currency', 'RUB')}")
+    sizes = _sort_sizes([x["size"] for x in p.get("sizes", []) if x.get("is_active") and x.get("size")])
+    colors = _unique_keep_order([x["color"] for x in p.get("colors", []) if x.get("is_active") and x.get("color")])
 
     gender = GENDER_LABELS.get(p.get("gender", ""), p.get("gender", ""))
     category = CATEGORY_LABELS.get(p.get("category", ""), p.get("category", ""))
     season = SEASON_LABELS.get(p.get("season", ""), p.get("season", ""))
     insulation = INSULATION_LABELS.get(p.get("insulation", ""), p.get("insulation", ""))
 
+    currency_raw = (p.get("currency") or "RUB").strip().upper()
+    currency = "₽" if currency_raw == "RUB" else currency_raw
+
+    out = []
+
+    if p.get("is_sale"):
+        out.append("🔥 РАСПРОДАЖА")
+
+    title = (p.get("title") or "").strip()
+    if title:
+        out.append(f"🛍 {title}")
+
+    out.append(f"🏷️ Артикул: {p['sku']}")
+    out.append(f"💰 Цена: {_format_price(p.get('price', 0))} {currency}")
+    out.append(f"Статус: {'АКТИВЕН' if p.get('is_active') else 'НЕ АКТИВЕН'}")
+
     if gender:
-        lines.append(f"Пол: {gender}")
+        out.append(f"👤 Пол: {gender}")
     if category:
-        lines.append(f"Категория: {category}")
+        out.append(f"🧥 Категория: {category}")
     if season:
-        lines.append(f"Сезон: {season}")
+        out.append(f"🌦️ Сезон: {season}")
     if insulation:
-        lines.append(f"Утеплитель: {insulation}")
+        out.append(f"❄️ Утеплитель: {insulation}")
     if p.get("material"):
-        lines.append(f"Материал: {p['material']}")
+        out.append(f"🧵 Материал: {p['material']}")
+
+    out.append("📏 Размеры: " + (", ".join(sizes) if sizes else "—"))
+    out.append("🎨 Цвета: " + (", ".join(colors) if colors else "—"))
+
+    desc = (p.get("description") or "").strip()
+    if desc:
+        out.append("")
+        out.append("📝 Описание:")
+        out.append(desc)
+
+    return "\n".join(out)
+
+
+def _render_channel_text(p: dict) -> str:
+    sizes = _sort_sizes([x["size"] for x in p.get("sizes", []) if x.get("is_active") and x.get("size")])
+    colors = _unique_keep_order([x["color"] for x in p.get("colors", []) if x.get("is_active") and x.get("color")])
+
+    gender = GENDER_LABELS.get(p.get("gender", ""), p.get("gender", ""))
+    category = CATEGORY_LABELS.get(p.get("category", ""), p.get("category", ""))
+    season = SEASON_LABELS.get(p.get("season", ""), p.get("season", ""))
+    insulation = INSULATION_LABELS.get(p.get("insulation", ""), p.get("insulation", ""))
+
+    currency_raw = (p.get("currency") or "RUB").strip().upper()
+    currency = "₽" if currency_raw == "RUB" else currency_raw
+
+    title = (p.get("title") or "").strip()
+    if not title:
+        fallback_parts = []
+        if gender:
+            fallback_parts.append(gender.capitalize())
+        if category:
+            fallback_parts.append(category)
+        title = " ".join(fallback_parts).strip()
+
+    lines = []
+
+    if p.get("is_sale"):
+        lines.append("🔥 РАСПРОДАЖА")
+
+    if title:
+        lines.append(f"🛍 {title}")
+
+    if lines:
+        lines.append("")
+
+    if p.get("price") not in (None, ""):
+        lines.append(f"💰 {_format_price(p.get('price', 0))} {currency}")
+
+    sku = str(p.get("sku") or "").strip()
+    if sku:
+        lines.append(f"🏷️ Артикул: {sku}")
+
+    info_lines = []
+
+    if season:
+        info_lines.append(f"🌦️ Сезон: {season}")
+    if insulation:
+        info_lines.append(f"❄️ Утеплитель: {insulation}")
+    if p.get("material"):
+        info_lines.append(f"🧵 Материал: {p['material']}")
     if sizes:
-        lines.append("Размеры: " + ", ".join(sizes))
+        info_lines.append("📏 Размеры: " + ", ".join(sizes))
     if colors:
-        lines.append("Цвета: " + ", ".join(colors))
+        info_lines.append("🎨 Цвета: " + ", ".join(colors))
+
+    if info_lines:
+        lines.append("")
+        lines.extend(info_lines)
 
     desc = (p.get("description") or "").strip()
     if desc:
         lines.append("")
+        lines.append("📝 Описание:")
         lines.append(desc)
+
+    lines.append("")
+    lines.append(f"📞 {WHOLESALE_NOTE}")
 
     return "\n".join(lines)
 
@@ -348,7 +413,7 @@ async def _save_add_session(s: AddSession) -> None:
     for size in SIZES:
         await set_variant_active(s.sku, size, size in s.sizes)
 
-    for color in s.colors:
+    for color in _unique_keep_order(s.colors):
         await add_color(s.sku, color)
 
     for file_id in s.photo_file_ids:
@@ -376,6 +441,27 @@ async def send_product_card(chat_id: int, sku: str, bot: Bot) -> None:
         await bot.send_message(chat_id, text, reply_markup=kb)
 
 
+async def remove_product_from_channel(bot: Bot, sku: str) -> None:
+    channel_id = getattr(settings, "CHANNEL_ID", "").strip()
+    if not channel_id:
+        return
+
+    publications = await get_product_publications(sku)
+    if not publications:
+        return
+
+    for pub in publications:
+        message_id = pub.get("message_id")
+        if not message_id:
+            continue
+        try:
+            await bot.delete_message(chat_id=channel_id, message_id=message_id)
+        except Exception:
+            pass
+
+    await clear_product_publications(sku)
+
+
 async def publish_product_to_channel(bot: Bot, sku: str) -> None:
     p = await get_product(sku)
     if not p:
@@ -388,6 +474,9 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
     text = _render_channel_text(p)
     photos = p.get("photo_file_ids") or []
 
+    await remove_product_from_channel(bot, sku)
+    await clear_product_publications(sku)
+
     if len(photos) >= 2:
         media = []
         for i, fid in enumerate(photos[:10]):
@@ -395,23 +484,41 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
                 media.append(InputMediaPhoto(media=fid, caption=text))
             else:
                 media.append(InputMediaPhoto(media=fid))
-        await bot.send_media_group(
+
+        messages = await bot.send_media_group(
             chat_id=channel_id,
             media=media,
         )
+
+        for msg in messages:
+            await save_product_publication(
+                sku=sku,
+                chat_id=str(channel_id),
+                message_id=msg.message_id,
+            )
         return
 
     if len(photos) == 1:
-        await bot.send_photo(
+        msg = await bot.send_photo(
             chat_id=channel_id,
             photo=photos[0],
             caption=text,
         )
+        await save_product_publication(
+            sku=sku,
+            chat_id=str(channel_id),
+            message_id=msg.message_id,
+        )
         return
 
-    await bot.send_message(
+    msg = await bot.send_message(
         chat_id=channel_id,
         text=text,
+    )
+    await save_product_publication(
+        sku=sku,
+        chat_id=str(channel_id),
+        message_id=msg.message_id,
     )
 
 
@@ -742,6 +849,7 @@ async def admin_text_router(m: Message, bot: Bot):
         if product:
             if "продан" in cmd:
                 await set_product_active(sku, False)
+                await remove_product_from_channel(bot, sku)
                 await m.answer(f"Ок, {sku} снят с ленты.")
                 await send_product_card(m.chat.id, sku, bot)
                 return
@@ -770,7 +878,12 @@ async def cb_toggle_active(cb: CallbackQuery, bot: Bot):
     if not p:
         return await cb.answer("Товар не найден", show_alert=True)
 
-    await set_product_active(sku, not bool(p.get("is_active")))
+    new_active = not bool(p.get("is_active"))
+    await set_product_active(sku, new_active)
+
+    if not new_active:
+        await remove_product_from_channel(bot, sku)
+
     await cb.answer("Готово")
     if cb.message:
         await cb.message.delete()
@@ -920,7 +1033,9 @@ async def cb_color_toggle(cb: CallbackQuery):
     p2 = await get_product(sku)
     await cb.answer("Ок")
     if cb.message:
-        await cb.message.edit_reply_markup(reply_markup=_colors_manage_kb(token, p2.get("colors", []), _COLOR_TOKENS))
+        await cb.message.edit_reply_markup(
+            reply_markup=_colors_manage_kb(token, p2.get("colors", []), _COLOR_TOKENS)
+        )
 
 
 @router.callback_query(F.data.startswith("prd:pub:"))
@@ -955,5 +1070,6 @@ async def cb_back(cb: CallbackQuery, bot: Bot):
     if cb.message:
         await cb.message.delete()
     await send_product_card(cb.from_user.id, sku, bot)
+
 
 

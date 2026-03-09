@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     WEBHOOK_BASE: str = ""
     WEBHOOK_PATH: str = "/webhook"
     WEBHOOK_SECRET: str
-    DB_PATH: str = "/var/data/moslav.sqlite3"
+    DB_PATH: str = "/var/data/data.db"
     ADMIN_IDS: list[int] = []
     CHANNEL_ID: str = "-1001988399559"
 
@@ -53,5 +53,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
 

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     DB_PATH: str = "/var/data/data.db"
     ADMIN_IDS: list[int] = []
     CHANNEL_ID: str = "-1001988399559"
+    BOT_USERNAME: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

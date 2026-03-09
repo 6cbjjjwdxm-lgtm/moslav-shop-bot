@@ -326,21 +326,23 @@ def _render_channel_text(p: dict) -> str:
             fallback_parts.append(category)
         title = " ".join(fallback_parts).strip()
 
+    sku = str(p.get("sku") or "").strip()
+    seller_link = _seller_deep_link(sku)
+
     lines = []
 
     if p.get("is_sale"):
-        lines.append("🔥 РАСПРОДАЖА")
+        lines.append("🔥 <b>РАСПРОДАЖА</b>")
 
     if title:
-        lines.append(f"🛍 {title}")
+        lines.append(f"🛍 <b>{title}</b>")
 
     if lines:
         lines.append("")
 
     if p.get("price") not in (None, ""):
-        lines.append(f"💰 {_format_price(p.get('price', 0))} {currency}")
+        lines.append(f"💰 <b>{_format_price(p.get('price', 0))} {currency}</b>")
 
-    sku = str(p.get("sku") or "").strip()
     if sku:
         lines.append(f"🏷️ Артикул: {sku}")
 
@@ -364,10 +366,11 @@ def _render_channel_text(p: dict) -> str:
     desc = (p.get("description") or "").strip()
     if desc:
         lines.append("")
-        lines.append("📝 Описание:")
+        lines.append("📝 <b>Описание:</b>")
         lines.append(desc)
 
     lines.append("")
+    lines.append(f'💬 <a href="{seller_link}"><b>Написать продавцу</b></a>')
     lines.append(f"📞 {WHOLESALE_NOTE}")
 
     return "\n".join(lines)
@@ -412,6 +415,12 @@ def _parse_sku_cmd(text: str) -> tuple[str, str]:
     cmd = parts[1].strip().lower() if len(parts) == 2 else ""
     return sku, cmd
 
+def _seller_deep_link(sku: str) -> str:
+    bot_username = (getattr(settings, "BOT_USERNAME", "") or "").strip().lstrip("@")
+    if not bot_username:
+        return "https://t.me"
+    sku = (sku or "").strip()
+    return f"https://t.me/{bot_username}?start=manager_{sku}" if sku else f"https://t.me/{bot_username}?start=manager"
 
 async def _save_add_session(s: AddSession) -> None:
     await upsert_product(
@@ -499,10 +508,9 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
         media = []
         for i, fid in enumerate(photos[:10]):
             if i == 0:
-                media.append(InputMediaPhoto(media=fid, caption=text))
+                media.append(InputMediaPhoto(media=fid, caption=text, parse_mode="HTML"))
             else:
                 media.append(InputMediaPhoto(media=fid))
-
         messages = await bot.send_media_group(
             chat_id=channel_id,
             media=media,
@@ -521,6 +529,7 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
             chat_id=channel_id,
             photo=photos[0],
             caption=text,
+            parse_mode="HTML",
         )
         await save_product_publication(
             sku=sku,
@@ -532,6 +541,8 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
     msg = await bot.send_message(
         chat_id=channel_id,
         text=text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )
     await save_product_publication(
         sku=sku,

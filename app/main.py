@@ -6,6 +6,7 @@ from .config import settings
 from .db import init_db
 from .handlers import router
 from .admin import router as admin_router
+from .sales import router as sales_router
 
 app = FastAPI()
 
@@ -13,8 +14,8 @@ bot = Bot(token=settings.BOT_TOKEN)
 dp = Dispatcher()
 
 dp.include_router(admin_router)
+dp.include_router(sales_router)
 dp.include_router(router)
-
 
 @app.on_event("startup")
 async def on_startup():

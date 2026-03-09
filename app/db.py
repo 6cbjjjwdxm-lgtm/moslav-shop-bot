@@ -376,4 +376,21 @@ async def clear_product_publications(sku: str) -> None:
         )
         await db.commit()
 
+async def update_product_description(sku: str, description: str) -> None:
+    now = int(time.time())
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            "UPDATE products SET description=?, updated_at=? WHERE sku=?",
+            ((description or "").strip(), now, sku),
+        )
+        await db.commit()
+
+async def delete_product(sku: str) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute("DELETE FROM product_publications WHERE sku=?", (sku,))
+        await db.execute("DELETE FROM product_photos WHERE sku=?", (sku,))
+        await db.execute("DELETE FROM product_colors WHERE sku=?", (sku,))
+        await db.execute("DELETE FROM product_variants WHERE sku=?", (sku,))
+        await db.execute("DELETE FROM products WHERE sku=?", (sku,))
+        await db.commit()
 

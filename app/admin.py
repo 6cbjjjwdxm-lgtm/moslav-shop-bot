@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
@@ -20,6 +21,7 @@ from .db import (
     add_color,
     add_photo_file_id,
     clear_product_publications,
+    delete_product,
     get_product,
     get_product_publications,
     save_product_publication,
@@ -27,6 +29,7 @@ from .db import (
     set_product_active,
     set_variant_active,
     toggle_product_sale,
+    update_product_description,
     update_product_price,
     upsert_product,
 )
@@ -151,6 +154,20 @@ def _sort_sizes(items: list[str]) -> list[str]:
     return sorted(cleaned, key=lambda x: order.get(x, 999))
 
 
+async def _safe_answer_callback(
+    cb: CallbackQuery,
+    text: str | None = None,
+    show_alert: bool = False,
+) -> None:
+    try:
+        await cb.answer(text or "", show_alert=show_alert)
+    except TelegramBadRequest as e:
+        msg = str(e).lower()
+        if "query is too old" in msg or "query id is invalid" in msg:
+            return
+        raise
+
+
 def _admin_home_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="➕ Добавить товар", callback_data="adm:add"))
@@ -207,9 +224,11 @@ def _product_actions_kb(token: str, is_active: bool, is_sale: bool) -> InlineKey
         )
     )
     b.row(InlineKeyboardButton(text="💰 Изменить цену", callback_data=f"prd:price:{token}"))
+    b.row(InlineKeyboardButton(text="📝 Изменить описание", callback_data=f"prd:desc:{token}"))
     b.row(InlineKeyboardButton(text="📏 Размеры", callback_data=f"prd:sizes:{token}"))
     b.row(InlineKeyboardButton(text="🎨 Цвета", callback_data=f"prd:colors:{token}"))
     b.row(InlineKeyboardButton(text="📢 Опубликовать в канал", callback_data=f"prd:pub:{token}"))
+    b.row(InlineKeyboardButton(text="🗑 Удалить товар", callback_data=f"prd:del:{token}"))
     return b.as_markup()
 
 
@@ -475,7 +494,6 @@ async def publish_product_to_channel(bot: Bot, sku: str) -> None:
     photos = p.get("photo_file_ids") or []
 
     await remove_product_from_channel(bot, sku)
-    await clear_product_publications(sku)
 
     if len(photos) >= 2:
         media = []
@@ -534,8 +552,9 @@ async def admin_start(m: Message):
 @router.callback_query(F.data == "adm:edit")
 async def adm_edit(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
-    await cb.answer()
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.answer("Пришли артикул товара, и я покажу карточку.")
 
@@ -543,10 +562,10 @@ async def adm_edit(cb: CallbackQuery):
 @router.callback_query(F.data == "adm:add")
 async def adm_add_start(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
 
     _ADD_SESSIONS[cb.from_user.id] = AddSession(step="sku")
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.answer(
             "Добавление товара.\n\nШаг 1/10: пришли артикул товара.\n"
@@ -559,7 +578,7 @@ async def add_cancel(cb: CallbackQuery):
     if not cb.from_user:
         return
     _ADD_SESSIONS.pop(cb.from_user.id, None)
-    await cb.answer("Отменено")
+    await _safe_answer_callback(cb, "Отменено")
     if cb.message:
         await cb.message.answer("Добавление товара отменено.")
 
@@ -570,11 +589,11 @@ async def add_gender(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "gender":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     s.gender = (cb.data or "").split(":", 2)[2]
     s.step = "category"
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.edit_text(
             "Шаг 3/10: выбери категорию.",
@@ -588,11 +607,11 @@ async def add_category(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "category":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     s.category = (cb.data or "").split(":", 2)[2]
     s.step = "season"
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.edit_text(
             "Шаг 4/10: выбери сезон.",
@@ -606,11 +625,11 @@ async def add_season(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "season":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     s.season = (cb.data or "").split(":", 2)[2]
     s.step = "insulation"
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.edit_text(
             "Шаг 5/10: выбери утеплитель.",
@@ -624,11 +643,11 @@ async def add_insulation(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "insulation":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     s.insulation = (cb.data or "").split(":", 2)[2]
     s.step = "material"
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.edit_text("Шаг 6/10: напиши материал товара текстом.")
 
@@ -639,14 +658,14 @@ async def add_size_toggle(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "sizes":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     value = (cb.data or "").split(":", 2)[2]
     if value == "done":
         if not s.sizes:
-            return await cb.answer("Выбери хотя бы один размер", show_alert=True)
+            return await _safe_answer_callback(cb, "Выбери хотя бы один размер", show_alert=True)
         s.step = "price"
-        await cb.answer()
+        await _safe_answer_callback(cb)
         if cb.message:
             await cb.message.edit_text("Шаг 9/10: введи цену одним числом, например 5990.")
         return
@@ -656,7 +675,7 @@ async def add_size_toggle(cb: CallbackQuery):
     else:
         s.sizes.add(value)
 
-    await cb.answer("Ок")
+    await _safe_answer_callback(cb, "Ок")
     if cb.message:
         await cb.message.edit_reply_markup(reply_markup=_sizes_select_kb(s.sizes))
 
@@ -667,11 +686,11 @@ async def add_sale(cb: CallbackQuery):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "sale":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
     s.is_sale = ((cb.data or "").split(":", 2)[2] == "1")
     s.step = "photos"
-    await cb.answer()
+    await _safe_answer_callback(cb)
     if cb.message:
         await cb.message.edit_text(
             "Шаг 10/10: отправь 1 или несколько фото товара.\n"
@@ -687,13 +706,13 @@ async def add_photos_done(cb: CallbackQuery, bot: Bot):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "photos":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
+    await _safe_answer_callback(cb, "Сохраняю...")
     await _save_add_session(s)
     sku = s.sku
     _ADD_SESSIONS.pop(cb.from_user.id, None)
 
-    await cb.answer("Сохранено")
     if cb.message:
         await cb.message.answer(f"Товар {sku} сохранён.")
     await send_product_card(cb.from_user.id, sku, bot)
@@ -705,13 +724,13 @@ async def add_photos_skip(cb: CallbackQuery, bot: Bot):
         return
     s = _ADD_SESSIONS.get(cb.from_user.id)
     if not s or s.step != "photos":
-        return await cb.answer()
+        return await _safe_answer_callback(cb)
 
+    await _safe_answer_callback(cb, "Сохраняю...")
     await _save_add_session(s)
     sku = s.sku
     _ADD_SESSIONS.pop(cb.from_user.id, None)
 
-    await cb.answer("Сохранено")
     if cb.message:
         await cb.message.answer(f"Товар {sku} сохранён без фото.")
     await send_product_card(cb.from_user.id, sku, bot)
@@ -756,6 +775,14 @@ async def admin_text_router(m: Message, bot: Bot):
             await update_product_price(pend.sku, price)
             _PENDING.pop(user_id, None)
             await m.answer("Цена обновлена.")
+            await send_product_card(m.chat.id, pend.sku, bot)
+            return
+
+        if pend.mode == "description":
+            description = "" if text == "-" else text
+            await update_product_description(pend.sku, description)
+            _PENDING.pop(user_id, None)
+            await m.answer("Описание обновлено.")
             await send_product_card(m.chat.id, pend.sku, bot)
             return
 
@@ -867,16 +894,22 @@ async def admin_text_router(m: Message, bot: Bot):
 @router.callback_query(F.data.startswith("prd:active:"))
 async def cb_toggle_active(cb: CallbackQuery, bot: Bot):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Готово")
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     p = await get_product(sku)
     if not p:
-        return await cb.answer("Товар не найден", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Товар не найден.")
+        return
 
     new_active = not bool(p.get("is_active"))
     await set_product_active(sku, new_active)
@@ -884,7 +917,6 @@ async def cb_toggle_active(cb: CallbackQuery, bot: Bot):
     if not new_active:
         await remove_product_from_channel(bot, sku)
 
-    await cb.answer("Готово")
     if cb.message:
         await cb.message.delete()
     await send_product_card(cb.from_user.id, sku, bot)
@@ -893,15 +925,19 @@ async def cb_toggle_active(cb: CallbackQuery, bot: Bot):
 @router.callback_query(F.data.startswith("prd:sale:"))
 async def cb_toggle_sale(cb: CallbackQuery, bot: Bot):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Готово")
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     await toggle_product_sale(sku)
-    await cb.answer("Готово")
+
     if cb.message:
         await cb.message.delete()
     await send_product_card(cb.from_user.id, sku, bot)
@@ -910,35 +946,65 @@ async def cb_toggle_sale(cb: CallbackQuery, bot: Bot):
 @router.callback_query(F.data.startswith("prd:price:"))
 async def cb_price(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     _PENDING[cb.from_user.id] = PendingInput(mode="price", sku=sku)
-    await cb.answer()
     if cb.message:
         await cb.message.answer(f"Введи новую цену для {sku} одним числом.")
+
+
+@router.callback_query(F.data.startswith("prd:desc:"))
+async def cb_description(cb: CallbackQuery):
+    if not cb.from_user or not _is_admin(cb.from_user.id):
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
+
+    token = (cb.data or "").split(":")[2]
+    sku = _CARD_TOKENS.get(token)
+    if not sku:
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
+
+    _PENDING[cb.from_user.id] = PendingInput(mode="description", sku=sku)
+    if cb.message:
+        await cb.message.answer(
+            f"Введи новое описание для {sku}.\n"
+            f"Если хочешь очистить описание — отправь -"
+        )
 
 
 @router.callback_query(F.data.startswith("prd:sizes:"))
 async def cb_sizes(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     p = await get_product(sku)
     if not p:
-        return await cb.answer("Не найдено", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Не найдено.")
+        return
 
     active_sizes = {x["size"] for x in p.get("sizes", []) if x.get("is_active")}
-    await cb.answer()
     if cb.message:
         await cb.message.edit_text(
             f"Размеры для {sku}:",
@@ -949,23 +1015,28 @@ async def cb_sizes(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prd:sz:"))
 async def cb_size_toggle(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Ок")
 
     _, _, token, size = (cb.data or "").split(":", 3)
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     p = await get_product(sku)
     if not p:
-        return await cb.answer("Не найдено", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Не найдено.")
+        return
 
     active_sizes = {x["size"] for x in p.get("sizes", []) if x.get("is_active")}
     await set_variant_active(sku, size, size not in active_sizes)
 
     p2 = await get_product(sku)
     active_sizes2 = {x["size"] for x in p2.get("sizes", []) if x.get("is_active")}
-    await cb.answer("Ок")
     if cb.message:
         await cb.message.edit_reply_markup(reply_markup=_sizes_manage_kb(token, active_sizes2))
 
@@ -973,18 +1044,23 @@ async def cb_size_toggle(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prd:colors:"))
 async def cb_colors(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     p = await get_product(sku)
     if not p:
-        return await cb.answer("Не найдено", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Не найдено.")
+        return
 
-    await cb.answer()
     if cb.message:
         await cb.message.edit_text(
             f"Цвета для {sku}:",
@@ -995,15 +1071,18 @@ async def cb_colors(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prd:cladd:"))
 async def cb_color_add(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     _PENDING[cb.from_user.id] = PendingInput(mode="add_color", sku=sku)
-    await cb.answer()
     if cb.message:
         await cb.message.answer(f"Напиши новый цвет для {sku} текстом.")
 
@@ -1011,27 +1090,34 @@ async def cb_color_add(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prd:cl:"))
 async def cb_color_toggle(cb: CallbackQuery):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Ок")
 
     ct = (cb.data or "").split(":")[2]
     pair = _COLOR_TOKENS.get(ct)
     if not pair:
-        return await cb.answer("Кнопка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Кнопка устарела. Открой товар снова.")
+        return
 
     token, color = pair
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     p = await get_product(sku)
     if not p:
-        return await cb.answer("Не найдено", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Не найдено.")
+        return
 
     colors = {x["color"]: bool(x["is_active"]) for x in p.get("colors", [])}
     await set_color_active(sku, color, not colors.get(color, True))
 
     p2 = await get_product(sku)
-    await cb.answer("Ок")
     if cb.message:
         await cb.message.edit_reply_markup(
             reply_markup=_colors_manage_kb(token, p2.get("colors", []), _COLOR_TOKENS)
@@ -1041,35 +1127,96 @@ async def cb_color_toggle(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prd:pub:"))
 async def cb_publish(cb: CallbackQuery, bot: Bot):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Публикую...")
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
     try:
         await publish_product_to_channel(bot, sku)
     except Exception as e:
-        return await cb.answer(f"Ошибка публикации: {e}", show_alert=True)
+        if cb.message:
+            await cb.message.answer(f"Ошибка публикации: {e}")
+        return
 
-    await cb.answer("Товар опубликован в канал.", show_alert=True)
+    if cb.message:
+        await cb.message.answer("Товар опубликован в канал.")
+
+
+@router.callback_query(F.data.startswith("prd:del:"))
+async def cb_delete_product_ask(cb: CallbackQuery):
+    if not cb.from_user or not _is_admin(cb.from_user.id):
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
+
+    token = (cb.data or "").split(":")[2]
+    sku = _CARD_TOKENS.get(token)
+    if not sku:
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"prd:delok:{token}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"prd:back:{token}")],
+        ]
+    )
+
+    if cb.message:
+        await cb.message.answer(f"Удалить товар {sku} из базы данных?", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("prd:delok:"))
+async def cb_delete_product_confirm(cb: CallbackQuery, bot: Bot):
+    if not cb.from_user or not _is_admin(cb.from_user.id):
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb, "Удаляю...")
+
+    token = (cb.data or "").split(":")[2]
+    sku = _CARD_TOKENS.get(token)
+    if not sku:
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
+
+    await remove_product_from_channel(bot, sku)
+    await delete_product(sku)
+
+    for k, v in list(_CARD_TOKENS.items()):
+        if v == sku:
+            _CARD_TOKENS.pop(k, None)
+
+    if cb.message:
+        await cb.message.answer(f"Товар {sku} полностью удалён из базы.")
 
 
 @router.callback_query(F.data.startswith("prd:back:"))
 async def cb_back(cb: CallbackQuery, bot: Bot):
     if not cb.from_user or not _is_admin(cb.from_user.id):
-        return await cb.answer("Нет доступа", show_alert=True)
+        return await _safe_answer_callback(cb, "Нет доступа", show_alert=True)
+
+    await _safe_answer_callback(cb)
 
     token = (cb.data or "").split(":")[2]
     sku = _CARD_TOKENS.get(token)
     if not sku:
-        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+        if cb.message:
+            await cb.message.answer("Карточка устарела. Открой товар снова.")
+        return
 
-    await cb.answer()
     if cb.message:
         await cb.message.delete()
     await send_product_card(cb.from_user.id, sku, bot)
+
 
 
 

@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .config import settings
@@ -24,13 +30,10 @@ from .db import (
 
 router = Router(name="admin")
 
-MY_ADMIN_ID = 459980503  # сюда поставь свой Telegram ID
+MY_ADMIN_ID = 459980503
+ALL_ADMIN_IDS = list(set([MY_ADMIN_ID, *list(getattr(settings, "admin_id_set", set()))]))
 
-ADMIN_FILTER = F.from_user.id == MY_ADMIN_ID
-
-def _is_admin(user_id: int) -> bool:
-    return user_id == MY_ADMIN_ID
-
+ADMIN_FILTER = F.from_user.id.in_(ALL_ADMIN_IDS)
 PRIVATE_FILTER = F.chat.type == ChatType.PRIVATE
 
 WHOLESALE_NOTE = "По вопросам закупок по оптовым ценам обращайтесь по тел. 8-903-776-17-47"
@@ -46,7 +49,7 @@ CATEGORIES = [
     ("Футболка", "tshirt"),
     ("Шорты", "shorts"),
     ("Безрукавка", "vest"),
-    ("Анарак", "anorak"),
+    ("Анорак", "anorak"),
     ("Куртка", "jacket"),
     ("Спортивный костюм", "tracksuit"),
 ]
@@ -67,9 +70,39 @@ INSULATIONS = [
 
 SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"]
 
+GENDER_LABELS = {
+    "male": "мужской",
+    "female": "женский",
+}
+
+CATEGORY_LABELS = {
+    "pants": "брюки",
+    "hoodie": "толстовка",
+    "tshirt": "футболка",
+    "shorts": "шорты",
+    "vest": "безрукавка",
+    "anorak": "анорак",
+    "jacket": "куртка",
+    "tracksuit": "спортивный костюм",
+}
+
+SEASON_LABELS = {
+    "summer": "лето",
+    "autumn": "осень",
+    "winter": "зима",
+    "euro_winter": "еврозима",
+}
+
+INSULATION_LABELS = {
+    "": "",
+    "thinsulate": "тинсулейт",
+    "holofiber": "холофайбер",
+    "down": "пух",
+}
+
 
 def _is_admin(user_id: int) -> bool:
-    return user_id in settings.admin_id_set
+    return user_id in ALL_ADMIN_IDS
 
 
 def _new_token() -> str:
@@ -89,6 +122,16 @@ def _ensure_note(description: str) -> str:
     return WHOLESALE_NOTE
 
 
+def _format_price(value: float | int) -> str:
+    try:
+        f = float(value)
+        if f.is_integer():
+            return str(int(f))
+        return str(f)
+    except Exception:
+        return str(value)
+
+
 def _admin_home_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="➕ Добавить товар", callback_data="adm:add"))
@@ -96,7 +139,12 @@ def _admin_home_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def _choice_kb(prefix: str, items: list[tuple[str, str]], back: str | None = None, width: int = 2) -> InlineKeyboardMarkup:
+def _choice_kb(
+    prefix: str,
+    items: list[tuple[str, str]],
+    back: str | None = None,
+    width: int = 2,
+) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for text, value in items:
         b.button(text=text, callback_data=f"{prefix}:{value}")
@@ -142,6 +190,7 @@ def _product_actions_kb(token: str, is_active: bool, is_sale: bool) -> InlineKey
     b.row(InlineKeyboardButton(text="💰 Изменить цену", callback_data=f"prd:price:{token}"))
     b.row(InlineKeyboardButton(text="📏 Размеры", callback_data=f"prd:sizes:{token}"))
     b.row(InlineKeyboardButton(text="🎨 Цвета", callback_data=f"prd:colors:{token}"))
+    b.row(InlineKeyboardButton(text="📢 Опубликовать в канал", callback_data=f"prd:pub:{token}"))
     return b.as_markup()
 
 
@@ -154,7 +203,11 @@ def _sizes_manage_kb(token: str, active_sizes: set[str]) -> InlineKeyboardMarkup
     return b.as_markup()
 
 
-def _colors_manage_kb(token: str, colors: list[dict], color_tokens: dict[str, tuple[str, str]]) -> InlineKeyboardMarkup:
+def _colors_manage_kb(
+    token: str,
+    colors: list[dict],
+    color_tokens: dict[str, tuple[str, str]],
+) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for c in colors:
         ct = _new_token()
@@ -190,6 +243,50 @@ def _render_product_text(p: dict) -> str:
         out.append("")
         out.append(desc)
     return "\n".join(out)
+
+
+def _render_channel_text(p: dict) -> str:
+    sizes = [x["size"] for x in p.get("sizes", []) if x.get("is_active")]
+    colors = [x["color"] for x in p.get("colors", []) if x.get("is_active")]
+
+    lines = []
+
+    if p.get("is_sale"):
+        lines.append("🔥 РАСПРОДАЖА")
+
+    title = (p.get("title") or "").strip()
+    if title:
+        lines.append(title)
+
+    lines.append(f"Артикул: {p['sku']}")
+    lines.append(f"Цена: {_format_price(p.get('price', 0))} {p.get('currency', 'RUB')}")
+
+    gender = GENDER_LABELS.get(p.get("gender", ""), p.get("gender", ""))
+    category = CATEGORY_LABELS.get(p.get("category", ""), p.get("category", ""))
+    season = SEASON_LABELS.get(p.get("season", ""), p.get("season", ""))
+    insulation = INSULATION_LABELS.get(p.get("insulation", ""), p.get("insulation", ""))
+
+    if gender:
+        lines.append(f"Пол: {gender}")
+    if category:
+        lines.append(f"Категория: {category}")
+    if season:
+        lines.append(f"Сезон: {season}")
+    if insulation:
+        lines.append(f"Утеплитель: {insulation}")
+    if p.get("material"):
+        lines.append(f"Материал: {p['material']}")
+    if sizes:
+        lines.append("Размеры: " + ", ".join(sizes))
+    if colors:
+        lines.append("Цвета: " + ", ".join(colors))
+
+    desc = (p.get("description") or "").strip()
+    if desc:
+        lines.append("")
+        lines.append(desc)
+
+    return "\n".join(lines)
 
 
 @dataclass
@@ -277,6 +374,45 @@ async def send_product_card(chat_id: int, sku: str, bot: Bot) -> None:
             await bot.send_photo(chat_id, fid)
     else:
         await bot.send_message(chat_id, text, reply_markup=kb)
+
+
+async def publish_product_to_channel(bot: Bot, sku: str) -> None:
+    p = await get_product(sku)
+    if not p:
+        raise RuntimeError("Товар не найден.")
+
+    channel_id = getattr(settings, "CHANNEL_ID", "").strip()
+    if not channel_id:
+        raise RuntimeError("Не задан CHANNEL_ID.")
+
+    text = _render_channel_text(p)
+    photos = p.get("photo_file_ids") or []
+
+    if len(photos) >= 2:
+        media = []
+        for i, fid in enumerate(photos[:10]):
+            if i == 0:
+                media.append(InputMediaPhoto(media=fid, caption=text))
+            else:
+                media.append(InputMediaPhoto(media=fid))
+        await bot.send_media_group(
+            chat_id=channel_id,
+            media=media,
+        )
+        return
+
+    if len(photos) == 1:
+        await bot.send_photo(
+            chat_id=channel_id,
+            photo=photos[0],
+            caption=text,
+        )
+        return
+
+    await bot.send_message(
+        chat_id=channel_id,
+        text=text,
+    )
 
 
 @router.message(Command("start"), PRIVATE_FILTER, ADMIN_FILTER)
@@ -503,7 +639,6 @@ async def admin_text_router(m: Message, bot: Bot):
     user_id = m.from_user.id
     text = (m.text or "").strip()
 
-    # pending edit actions
     pend = _PENDING.get(user_id)
     if pend:
         if pend.mode == "price":
@@ -527,7 +662,6 @@ async def admin_text_router(m: Message, bot: Bot):
             await send_product_card(m.chat.id, pend.sku, bot)
             return
 
-    # add flow
     s = _ADD_SESSIONS.get(user_id)
     if s:
         if s.step == "sku":
@@ -596,10 +730,12 @@ async def admin_text_router(m: Message, bot: Bot):
             return
 
         if s.step == "photos":
-            await m.answer("Сейчас жду фото. Отправь фото или нажми кнопку «Готово/Пропустить».", reply_markup=_photos_kb())
+            await m.answer(
+                "Сейчас жду фото. Отправь фото или нажми кнопку «Готово/Пропустить».",
+                reply_markup=_photos_kb(),
+            )
             return
 
-    # sku shortcuts
     sku, cmd = _parse_sku_cmd(text)
     if sku:
         product = await get_product(sku)
@@ -618,8 +754,6 @@ async def admin_text_router(m: Message, bot: Bot):
 
             await send_product_card(m.chat.id, sku, bot)
             return
-
-    # если текст админа не подошёл ни под один админ-сценарий — просто не мешаем user router
 
 
 @router.callback_query(F.data.startswith("prd:active:"))
@@ -789,6 +923,24 @@ async def cb_color_toggle(cb: CallbackQuery):
         await cb.message.edit_reply_markup(reply_markup=_colors_manage_kb(token, p2.get("colors", []), _COLOR_TOKENS))
 
 
+@router.callback_query(F.data.startswith("prd:pub:"))
+async def cb_publish(cb: CallbackQuery, bot: Bot):
+    if not cb.from_user or not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+
+    token = (cb.data or "").split(":")[2]
+    sku = _CARD_TOKENS.get(token)
+    if not sku:
+        return await cb.answer("Карточка устарела. Открой товар снова.", show_alert=True)
+
+    try:
+        await publish_product_to_channel(bot, sku)
+    except Exception as e:
+        return await cb.answer(f"Ошибка публикации: {e}", show_alert=True)
+
+    await cb.answer("Товар опубликован в канал.", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("prd:back:"))
 async def cb_back(cb: CallbackQuery, bot: Bot):
     if not cb.from_user or not _is_admin(cb.from_user.id):
@@ -803,4 +955,5 @@ async def cb_back(cb: CallbackQuery, bot: Bot):
     if cb.message:
         await cb.message.delete()
     await send_product_card(cb.from_user.id, sku, bot)
+
 

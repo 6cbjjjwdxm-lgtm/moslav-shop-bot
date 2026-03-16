@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     BOT_TOKEN: str
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
     WEBHOOK_BASE: str = ""
     WEBHOOK_PATH: str = "/webhook"
     WEBHOOK_SECRET: str
